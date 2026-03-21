@@ -4,6 +4,31 @@ function search_via_perplexity_openrouter(params, userSettings) {
   const systemMessage = userSettings.systemMessage || 'Be precise and concise.';
   const key = userSettings.apiKey;
 
+  function contentToString(content) {
+    if (typeof content === 'string') {
+      return content;
+    }
+
+    if (Array.isArray(content)) {
+      return content
+        .map((part) => {
+          if (typeof part === 'string') {
+            return part;
+          }
+
+          if (part && typeof part.text === 'string') {
+            return part.text;
+          }
+
+          return '';
+        })
+        .filter(Boolean)
+        .join(' ');
+    }
+
+    return '';
+  }
+
   if (!key) {
     throw new Error(
       'Please set the OpenRouter API Key in the plugin settings.'
@@ -31,9 +56,41 @@ function search_via_perplexity_openrouter(params, userSettings) {
       ],
     }),
   })
-    .then((r) => r.json())
+    .then(async (r) => {
+      const raw = await r.text();
+      let response = {};
+
+      if (raw) {
+        try {
+          response = JSON.parse(raw);
+        } catch (error) {
+          throw new Error(
+            'OpenRouter returned an unreadable response (HTTP ' + r.status + ').'
+          );
+        }
+      }
+
+      if (!r.ok || response.error) {
+        const message =
+          (response.error && response.error.message) ||
+          'Request failed with HTTP ' + r.status + '.';
+
+        throw new Error('OpenRouter error: ' + message);
+      }
+
+      return response;
+    })
     .then((response) => {
-      const content = response.choices.map((c) => c.message.content).join(' ');
+      const choices = Array.isArray(response.choices) ? response.choices : [];
+
+      if (!choices.length) {
+        throw new Error('OpenRouter returned no answer choices.');
+      }
+
+      const content = choices
+        .map((c) => contentToString(c && c.message && c.message.content))
+        .filter(Boolean)
+        .join(' ');
       const citations = response.citations;
 
       return (
